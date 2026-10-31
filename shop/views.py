@@ -81,8 +81,16 @@ class PartnerUpdateView(APIView):
             URLValidator()(url)
         except ValidationError:
             return Response({'Status': False, 'Error': 'Некорректный URL.'}, status=status.HTTP_400_BAD_REQUEST)
-        import_shop_data(url)
-        return Response({'Status': True})
+        try:
+            shop = import_shop_data(url)
+        except Exception as exc:
+            return Response({'Status': False, 'Error': f'Не удалось импортировать прайс: {exc}'}, status=status.HTTP_400_BAD_REQUEST)
+        if shop.user_id and shop.user_id != request.user.id:
+            return Response({'Status': False, 'Error': 'Этот магазин уже привязан к другому аккаунту.'}, status=status.HTTP_403_FORBIDDEN)
+        shop.user = request.user
+        shop.url = url
+        shop.save(update_fields=['user', 'url'])
+        return Response({'Status': True, 'shop': shop.name})
 
 
 class PartnerStateView(APIView):
@@ -92,6 +100,13 @@ class PartnerStateView(APIView):
         shop = getattr(request.user, 'shop', None)
         if shop is None:
             return Response({'Status': False, 'Error': 'Поставщик не привязан к магазину.'}, status=400)
-        shop.state = bool(request.data.get('state', True))
+        from rest_framework import serializers
+        if 'state' not in request.data:
+            return Response({'Status': False, 'Error': 'Укажите state: true или false.'}, status=400)
+        try:
+            new_state = serializers.BooleanField().to_internal_value(request.data['state'])
+        except serializers.ValidationError:
+            return Response({'Status': False, 'Error': 'state должен быть true или false.'}, status=400)
+        shop.state = new_state
         shop.save(update_fields=['state'])
         return Response({'Status': True, 'state': shop.state})

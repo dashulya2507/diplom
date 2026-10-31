@@ -68,3 +68,29 @@ class ApiTests(TestCase):
         call_command('import_products', 'data/shop1.yaml')
         imported_shop = Shop.objects.get(name='Связной')
         self.assertEqual(imported_shop.product_infos.count(), 14)
+    def test_partner_state_and_orders(self):
+        partner = User.objects.create_user(
+            email='partner@example.com', password='password123', type='shop', is_active=True
+        )
+        partner_shop = Shop.objects.create(name='Partner shop', user=partner)
+        partner_category = Category.objects.create(name='Partner category')
+        partner_product = Product.objects.create(name='Partner product', category=partner_category)
+        partner_info = ProductInfo.objects.create(
+            product=partner_product, shop=partner_shop, external_id=77, quantity=5, price=10, price_rrc=12
+        )
+        order = Order.objects.create(user=self.user)
+        from orders.models import OrderItem
+        OrderItem.objects.create(order=order, product_info=partner_info, quantity=1, price=10)
+
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f'Token {Token.objects.create(user=partner).key}')
+        response = client.post('/api/partner/state/', {'state': False}, format='json')
+        self.assertEqual(response.status_code, 200)
+        partner_shop.refresh_from_db()
+        self.assertFalse(partner_shop.state)
+
+        response = client.get('/api/partner/orders/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 1)
+        self.assertEqual(response.json()[0]['id'], order.id)
+
